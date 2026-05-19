@@ -9,6 +9,9 @@ def start_keyboard(has_profile: bool = False) -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="Submit a Moment", callback_data="submit_photo"),
             InlineKeyboardButton(text="My Profile", callback_data="my_profile"),
         )
+        builder.row(
+            InlineKeyboardButton(text="Edit Profile", callback_data="edit_profile_menu"),
+        )
     else:
         builder.row(
             InlineKeyboardButton(text="Create Profile", callback_data="create_profile"),
@@ -37,7 +40,29 @@ def profile_confirm_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.row(
         InlineKeyboardButton(text="Looks good ✓", callback_data="profile_confirm"),
-        InlineKeyboardButton(text="Edit", callback_data="profile_edit"),
+        InlineKeyboardButton(text="Change Answers", callback_data="profile_edit"),
+    )
+    return builder.as_markup()
+
+
+def profile_view_keyboard() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="Edit Profile", callback_data="edit_profile_menu"),
+        InlineKeyboardButton(text="← Back", callback_data="back_to_start"),
+    )
+    return builder.as_markup()
+
+
+def profile_edit_menu_keyboard() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="Edit Name", callback_data="edit_name"),
+        InlineKeyboardButton(text="Edit Credit", callback_data="edit_credit"),
+    )
+    builder.row(
+        InlineKeyboardButton(text="Edit Bio", callback_data="edit_bio"),
+        InlineKeyboardButton(text="Back to Profile", callback_data="my_profile"),
     )
     return builder.as_markup()
 

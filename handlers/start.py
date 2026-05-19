@@ -1,5 +1,6 @@
 from aiogram import F, Router
 from aiogram.filters import CommandStart
+from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
 from keyboards.keyboards import back_to_start_keyboard, start_keyboard
@@ -44,10 +45,11 @@ async def cmd_start(message: Message):
 
 
 @router.callback_query(F.data == "back_to_start")
-async def back_to_start(callback: CallbackQuery):
+async def back_to_start(callback: CallbackQuery, state: FSMContext):
     async with AsyncSessionLocal() as session:
         user = await get_user(session, callback.from_user.id)
 
+    await state.clear()
     await callback.message.edit_text(
         "What would you like to do?",
         reply_markup=start_keyboard(has_profile=bool(user)),
