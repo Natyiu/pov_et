@@ -27,23 +27,25 @@ def _format_hashtags(raw: str | None) -> str | None:
 def build_post_caption(submission: Submission, user: User) -> str:
     lines = []
 
-    if submission.location:
-        lines.append(f"📍 {submission.location}")
-
-    if submission.caption:
-        lines.append(f'\n"{submission.caption}"')
-
-    credit = user.get_credit_display()
-    lines.append(f"\n📷 by {credit}")
-
-    if submission.status.value in ("featured_weekly", "featured_monthly"):
-        lines.append("\n✨ Featured")
-
     hashtag_line = _format_hashtags(submission.hashtags)
     if hashtag_line:
-        lines.append(f"\n{hashtag_line}")
+        lines.append(hashtag_line)
+        lines.append("")
 
-    lines.append(f"\n📡 {_channel_link()}")
+    if submission.location:
+        lines.append(submission.location)
+
+    if submission.caption:
+        lines.append(f'"{submission.caption}"')
+
+    credit = user.get_credit_display()
+    lines.append(f"📷 by {credit}")
+
+    if submission.status.value in ("featured_weekly", "featured_monthly"):
+        lines.append("✨ Featured")
+
+    lines.append("")
+    lines.append(_channel_link())
 
     return "\n".join(lines)
 
