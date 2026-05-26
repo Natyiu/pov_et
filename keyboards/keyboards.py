@@ -4,7 +4,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from models.models import AVAILABLE_HASHTAGS
 
 
-def start_keyboard(has_profile: bool = False) -> InlineKeyboardMarkup:
+def start_keyboard(has_profile: bool = False, is_admin: bool = False) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     if has_profile:
         builder.row(
@@ -21,6 +21,10 @@ def start_keyboard(has_profile: bool = False) -> InlineKeyboardMarkup:
         )
         builder.row(
             InlineKeyboardButton(text="My Profile", callback_data="my_profile"),
+        )
+    if is_admin:
+        builder.row(
+            InlineKeyboardButton(text="🛠 Admin Panel", callback_data="admin_panel_root"),
         )
     builder.row(
         InlineKeyboardButton(text="View Guidelines", callback_data="guidelines"),
@@ -114,7 +118,7 @@ def submission_confirm_keyboard() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-def admin_review_keyboard(submission_id: int) -> InlineKeyboardMarkup:
+def admin_review_keyboard(submission_id: int, is_super_admin: bool = False) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.row(
         InlineKeyboardButton(
@@ -126,26 +130,89 @@ def admin_review_keyboard(submission_id: int) -> InlineKeyboardMarkup:
             callback_data=f"admin_reject_{submission_id}",
         ),
     )
-    builder.row(
-        InlineKeyboardButton(
-            text="✏️ Edit caption",
-            callback_data=f"admin_edit_{submission_id}",
-        ),
-        InlineKeyboardButton(
-            text="📌 Feature candidate",
-            callback_data=f"admin_feature_{submission_id}",
-        ),
-    )
-    builder.row(
-        InlineKeyboardButton(
-            text="🚫 Ban user",
-            callback_data=f"admin_ban_{submission_id}",
-        ),
-    )
+    if is_super_admin:
+        builder.row(
+            InlineKeyboardButton(
+                text="✏️ Edit caption",
+                callback_data=f"admin_edit_{submission_id}",
+            ),
+            InlineKeyboardButton(
+                text="📌 Feature candidate",
+                callback_data=f"admin_feature_{submission_id}",
+            ),
+        )
+        builder.row(
+            InlineKeyboardButton(
+                text="🚫 Ban user",
+                callback_data=f"admin_ban_{submission_id}",
+            ),
+        )
     return builder.as_markup()
 
 
 def back_to_start_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.row(InlineKeyboardButton(text="← Back", callback_data="back_to_start"))
+    return builder.as_markup()
+
+
+def admin_panel_keyboard() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="👥 Admins", callback_data="admin_panel_admins"),
+        InlineKeyboardButton(text="🚫 Bans", callback_data="admin_panel_bans"),
+    )
+    builder.row(
+        InlineKeyboardButton(text="📋 Users", callback_data="admin_panel_users"),
+        InlineKeyboardButton(text="📥 Pending", callback_data="admin_panel_pending"),
+    )
+    builder.row(
+        InlineKeyboardButton(text="✖ Close", callback_data="admin_panel_close"),
+    )
+    return builder.as_markup()
+
+
+def admin_manage_admins_keyboard() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="➕ Add admin", callback_data="admin_action_add_admin"),
+        InlineKeyboardButton(text="➖ Remove admin", callback_data="admin_action_remove_admin"),
+    )
+    builder.row(
+        InlineKeyboardButton(text="📋 List admins", callback_data="admin_action_list_admins"),
+    )
+    builder.row(
+        InlineKeyboardButton(text="← Back", callback_data="admin_panel_root"),
+    )
+    return builder.as_markup()
+
+
+def admin_manage_bans_keyboard() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="🚫 Ban user", callback_data="admin_action_ban"),
+        InlineKeyboardButton(text="✅ Unban user", callback_data="admin_action_unban"),
+    )
+    builder.row(
+        InlineKeyboardButton(text="📋 List banned", callback_data="admin_action_list_banned"),
+    )
+    builder.row(
+        InlineKeyboardButton(text="← Back", callback_data="admin_panel_root"),
+    )
+    return builder.as_markup()
+
+
+def admin_cancel_keyboard() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="✖ Cancel", callback_data="admin_panel_root"),
+    )
+    return builder.as_markup()
+
+
+def admin_back_to_panel_keyboard() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="← Back to panel", callback_data="admin_panel_root"),
+    )
     return builder.as_markup()

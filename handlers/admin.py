@@ -21,8 +21,18 @@ from services.user_service import (
     get_user,
     list_admin_users,
     list_banned_users,
+    list_users_with_submission_counts,
     set_user_admin,
     unban_user,
+)
+
+from keyboards.keyboards import (
+    admin_back_to_panel_keyboard,
+    admin_cancel_keyboard,
+    admin_manage_admins_keyboard,
+    admin_manage_bans_keyboard,
+    admin_panel_keyboard,
+    admin_review_keyboard,
 )
 
 router = Router()
@@ -50,6 +60,10 @@ class IsSuperAdmin(Filter):
 
 class AdminEditForm(StatesGroup):
     waiting_caption = State()
+
+
+class AdminPanelForm(StatesGroup):
+    waiting_user_id = State()
 
 
 async def _get_user(session, user_id: int) -> User | None:
@@ -167,7 +181,7 @@ async def admin_reject(callback: CallbackQuery, bot: Bot):
     await callback.answer("Rejected")
 
 
-@router.callback_query(IsAdmin(), F.data.startswith("admin_edit_"))
+@router.callback_query(IsSuperAdmin(), F.data.startswith("admin_edit_"))
 async def admin_edit_start(callback: CallbackQuery, state: FSMContext):
     submission_id = int(callback.data.split("_")[-1])
     await state.update_data(editing_submission_id=submission_id)
@@ -178,7 +192,7 @@ async def admin_edit_start(callback: CallbackQuery, state: FSMContext):
 
 @router.message(AdminEditForm.waiting_caption)
 async def admin_edit_caption(message: Message, state: FSMContext):
-    if not await IsAdmin().__call__(message):
+    if not await IsSuperAdmin().__call__(message):
         return
 
     data = await state.get_data()
@@ -196,7 +210,7 @@ async def admin_edit_caption(message: Message, state: FSMContext):
     await message.answer(f"Caption updated for submission #{submission_id}.")
 
 
-@router.callback_query(IsAdmin(), F.data.startswith("admin_feature_"))
+@router.callback_query(IsSuperAdmin(), F.data.startswith("admin_feature_"))
 async def admin_mark_feature(callback: CallbackQuery):
     submission_id = int(callback.data.split("_")[-1])
 
@@ -212,7 +226,7 @@ async def admin_mark_feature(callback: CallbackQuery):
     await callback.answer("Marked ✓")
 
 
-@router.callback_query(IsAdmin(), F.data.startswith("admin_ban_"))
+@router.callback_query(IsSuperAdmin(), F.data.startswith("admin_ban_"))
 async def admin_ban_user(callback: CallbackQuery, bot: Bot):
     submission_id = int(callback.data.split("_")[-1])
 
@@ -301,7 +315,7 @@ async def cmd_remove_admin(message: Message, bot: Bot):
         pass
 
 
-@router.message(IsAdmin(), Command("admins"))
+@router.message(IsSuperAdmin(), Command("admins"))
 async def cmd_list_admins(message: Message):
     async with AsyncSessionLocal() as session:
         admins = await list_admin_users(session)
@@ -316,7 +330,7 @@ async def cmd_list_admins(message: Message):
     await message.answer("\n".join(lines))
 
 
-@router.message(IsAdmin(), Command("unban"))
+@router.message(IsSuperAdmin(), Command("unban"))
 async def cmd_unban(message: Message, bot: Bot):
     target_id = _parse_telegram_id(message.text or "")
     if target_id is None:
@@ -343,7 +357,7 @@ async def cmd_unban(message: Message, bot: Bot):
         pass
 
 
-@router.message(IsAdmin(), Command("ban"))
+@router.message(IsSuperAdmin(), Command("ban"))
 async def cmd_ban(message: Message, bot: Bot):
     target_id = _parse_telegram_id(message.text or "")
     if target_id is None:
@@ -363,7 +377,7 @@ async def cmd_ban(message: Message, bot: Bot):
     await message.answer(f"Banned {user.display_name} (id {target_id}).")
 
 
-@router.message(IsAdmin(), Command("banned"))
+@router.message(IsSuperAdmin(), Command("banned"))
 async def cmd_list_banned(message: Message):
     async with AsyncSessionLocal() as session:
         banned = await list_banned_users(session)
@@ -376,3 +390,255 @@ async def cmd_list_banned(message: Message):
     for u in banned:
         lines.append(f"• {u.display_name} (id {u.telegram_id})")
     await message.answer("\n".join(lines))
+
+
+_PANEL_TITLE = "🛠 Admin Panel\n\nWhat would you like to do?"
+
+
+async def _show_panel(message: Message, edit: bool = True):
+    if edit:
+        try:
+            await message.edit_text(_PANEL_TITLE, reply_markup=admin_panel_keyboard())
+            return
+        except TelegramBadRequest:
+            pass
+    await message.answer(_PANEL_TITLE, reply_markup=admin_panel_keyboard())
+
+
+@router.message(IsSuperAdmin(), Command("admin"))
+async def cmd_admin_panel(message: Message, state: FSMContext):
+    await state.clear()
+    await _show_panel(message, edit=False)
+
+
+@router.callback_query(IsSuperAdmin(), F.data == "admin_panel_root")
+async def cb_panel_root(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
+    await _show_panel(callback.message, edit=True)
+    await callback.answer()
+
+
+@router.callback_query(IsSuperAdmin(), F.data == "admin_panel_close")
+async def cb_panel_close(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
+    try:
+        await callback.message.edit_text("Panel closed.")
+    except TelegramBadRequest:
+        pass
+    await callback.answer()
+
+
+@router.callback_query(IsSuperAdmin(), F.data == "admin_panel_admins")
+async def cb_panel_admins(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
+    await callback.message.edit_text(
+        "👥 Admin management",
+        reply_markup=admin_manage_admins_keyboard(),
+    )
+    await callback.answer()
+
+
+@router.callback_query(IsSuperAdmin(), F.data == "admin_panel_bans")
+async def cb_panel_bans(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
+    await callback.message.edit_text(
+        "🚫 Ban management",
+        reply_markup=admin_manage_bans_keyboard(),
+    )
+    await callback.answer()
+
+
+@router.callback_query(IsSuperAdmin(), F.data == "admin_panel_users")
+async def cb_panel_users(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
+    async with AsyncSessionLocal() as session:
+        rows = await list_users_with_submission_counts(session, limit=50)
+
+    if not rows:
+        text = "No users yet."
+    else:
+        lines = ["📋 Users (top 50 by submissions):\n"]
+        for user, count in rows:
+            flag = ""
+            if user.is_admin:
+                flag += " 👑"
+            if user.is_banned:
+                flag += " 🚫"
+            lines.append(
+                f"• {user.display_name} (id {user.telegram_id}){flag} — {count} submission(s)"
+            )
+        text = "\n".join(lines)
+
+    if len(text) > 3800:
+        text = text[:3800] + "\n…(truncated)"
+
+    await callback.message.edit_text(text, reply_markup=admin_back_to_panel_keyboard())
+    await callback.answer()
+
+
+@router.callback_query(IsSuperAdmin(), F.data == "admin_panel_pending")
+async def cb_panel_pending(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
+    from services.submission_service import get_pending_submissions
+
+    async with AsyncSessionLocal() as session:
+        pending = await get_pending_submissions(session)
+
+    if not pending:
+        text = "📥 No pending submissions."
+    else:
+        lines = [f"📥 Pending submissions ({len(pending)}):\n"]
+        for sub in pending[:50]:
+            media_count = len(sub.media)
+            location = sub.location or "no location"
+            lines.append(
+                f"• #{sub.id} — {media_count} photo(s), {location}"
+            )
+        text = "\n".join(lines)
+
+    await callback.message.edit_text(text, reply_markup=admin_back_to_panel_keyboard())
+    await callback.answer()
+
+
+_ACTION_PROMPTS = {
+    "add_admin": "Send the telegram id of the user to promote to admin.\n\n(They must have started the bot first.)",
+    "remove_admin": "Send the telegram id of the admin to demote.",
+    "ban": "Send the telegram id of the user to ban.",
+    "unban": "Send the telegram id of the user to unban.",
+}
+
+
+@router.callback_query(IsSuperAdmin(), F.data.startswith("admin_action_"))
+async def cb_admin_action(callback: CallbackQuery, state: FSMContext):
+    action = callback.data[len("admin_action_"):]
+
+    if action == "list_admins":
+        async with AsyncSessionLocal() as session:
+            admins = await list_admin_users(session)
+        lines = [f"👑 Super admin: id {_super_admin_id()}"]
+        if admins:
+            lines.append("\nAdmins:")
+            for u in admins:
+                lines.append(f"• {u.display_name} (id {u.telegram_id})")
+        else:
+            lines.append("\nNo additional admins.")
+        await callback.message.edit_text(
+            "\n".join(lines),
+            reply_markup=admin_back_to_panel_keyboard(),
+        )
+        await callback.answer()
+        return
+
+    if action == "list_banned":
+        async with AsyncSessionLocal() as session:
+            banned = await list_banned_users(session)
+        if not banned:
+            text = "✅ No banned users."
+        else:
+            lines = ["🚫 Banned users:"]
+            for u in banned:
+                lines.append(f"• {u.display_name} (id {u.telegram_id})")
+            text = "\n".join(lines)
+        await callback.message.edit_text(text, reply_markup=admin_back_to_panel_keyboard())
+        await callback.answer()
+        return
+
+    prompt = _ACTION_PROMPTS.get(action)
+    if not prompt:
+        await callback.answer("Unknown action.", show_alert=True)
+        return
+
+    # Super-admin gating for admin promotion/demotion
+    if action in ("add_admin", "remove_admin"):
+        if callback.from_user.id != _super_admin_id():
+            await callback.answer("Only the super admin can manage admins.", show_alert=True)
+            return
+
+    await state.set_state(AdminPanelForm.waiting_user_id)
+    await state.update_data(panel_action=action)
+    await callback.message.edit_text(prompt, reply_markup=admin_cancel_keyboard())
+    await callback.answer()
+
+
+@router.message(AdminPanelForm.waiting_user_id, IsSuperAdmin())
+async def handle_panel_user_id(message: Message, state: FSMContext, bot: Bot):
+    data = await state.get_data()
+    action = data.get("panel_action")
+    raw = (message.text or "").strip().lstrip("@")
+    try:
+        target_id = int(raw)
+    except ValueError:
+        await message.answer(
+            "That doesn't look like a telegram id. Send a number, or tap Cancel.",
+            reply_markup=admin_cancel_keyboard(),
+        )
+        return
+
+    await state.clear()
+
+    async with AsyncSessionLocal() as session:
+        user = await get_user(session, target_id)
+
+        if not user:
+            await message.answer(
+                f"No user with telegram id {target_id} found. "
+                "They need to /start the bot first.",
+                reply_markup=admin_back_to_panel_keyboard(),
+            )
+            return
+
+        if action == "add_admin":
+            if user.is_admin:
+                result = f"{user.display_name} is already an admin."
+            else:
+                await set_user_admin(session, user, True)
+                result = f"Promoted {user.display_name} (id {target_id}) to admin. ✓"
+                try:
+                    await bot.send_message(
+                        chat_id=target_id,
+                        text="You've been promoted to admin. You can now approve, reject, and review submissions.",
+                    )
+                except Exception:
+                    pass
+
+        elif action == "remove_admin":
+            if target_id == _super_admin_id():
+                result = "Cannot demote the super admin."
+            elif not user.is_admin:
+                result = f"{user.display_name} is not an admin."
+            else:
+                await set_user_admin(session, user, False)
+                result = f"Removed admin from {user.display_name} (id {target_id}). ✓"
+                try:
+                    await bot.send_message(
+                        chat_id=target_id,
+                        text="Your admin access has been removed.",
+                    )
+                except Exception:
+                    pass
+
+        elif action == "ban":
+            if user.is_banned:
+                result = f"{user.display_name} is already banned."
+            else:
+                await ban_user(session, user)
+                result = f"Banned {user.display_name} (id {target_id})."
+
+        elif action == "unban":
+            if not user.is_banned:
+                result = f"{user.display_name} is not banned."
+            else:
+                await unban_user(session, user)
+                result = f"Unbanned {user.display_name} (id {target_id}). ✓"
+                try:
+                    await bot.send_message(
+                        chat_id=target_id,
+                        text="Your account has been reinstated. You can submit moments again. ✦",
+                    )
+                except Exception:
+                    pass
+
+        else:
+            result = "Unknown action."
+
+    await message.answer(result, reply_markup=admin_back_to_panel_keyboard())

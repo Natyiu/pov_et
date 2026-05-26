@@ -3,11 +3,20 @@ from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
+from config import settings
 from keyboards.keyboards import back_to_start_keyboard, start_keyboard
 from services.database import AsyncSessionLocal
 from services.user_service import get_user
 
 router = Router()
+
+
+def _super_admin_id() -> int:
+    return settings.ADMIN_USER_ID or settings.ADMIN_CHAT_ID
+
+
+async def _is_admin(telegram_id: int, user) -> bool:
+    return telegram_id == _super_admin_id()
 
 WELCOME_TEXT = (
     "Welcome to Ethiopia Visual Archive 📷\n\n"
@@ -41,7 +50,11 @@ async def cmd_start(message: Message):
     if user:
         greeting = f"Welcome back, {user.display_name} 📷\n\nWhat would you like to do?"
 
-    await message.answer(greeting, reply_markup=start_keyboard(has_profile=bool(user)))
+    is_admin = await _is_admin(message.from_user.id, user)
+    await message.answer(
+        greeting,
+        reply_markup=start_keyboard(has_profile=bool(user), is_admin=is_admin),
+    )
 
 
 @router.callback_query(F.data == "back_to_start")
@@ -50,9 +63,10 @@ async def back_to_start(callback: CallbackQuery, state: FSMContext):
         user = await get_user(session, callback.from_user.id)
 
     await state.clear()
+    is_admin = await _is_admin(callback.from_user.id, user)
     await callback.message.edit_text(
         "What would you like to do?",
-        reply_markup=start_keyboard(has_profile=bool(user)),
+        reply_markup=start_keyboard(has_profile=bool(user), is_admin=is_admin),
     )
     await callback.answer()
 

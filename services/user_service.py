@@ -1,9 +1,9 @@
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from models.models import CreditType, POINTS, ReputationLog, User, level_for_points
+from models.models import CreditType, POINTS, ReputationLog, Submission, User, level_for_points
 
 
 async def get_user(session: AsyncSession, telegram_id: int) -> User | None:
@@ -81,6 +81,21 @@ async def unban_user(session: AsyncSession, user: User):
 async def list_banned_users(session: AsyncSession) -> list[User]:
     result = await session.execute(select(User).where(User.is_banned == True))
     return result.scalars().all()
+
+
+async def list_users_with_submission_counts(
+    session: AsyncSession,
+    limit: int = 50,
+) -> list[tuple[User, int]]:
+    sub_count = func.count(Submission.id).label("sub_count")
+    result = await session.execute(
+        select(User, sub_count)
+        .outerjoin(Submission, Submission.user_id == User.id)
+        .group_by(User.id)
+        .order_by(sub_count.desc(), User.created_at.desc())
+        .limit(limit)
+    )
+    return [(row[0], row[1]) for row in result.all()]
 
 
 async def set_user_admin(session: AsyncSession, user: User, is_admin: bool):

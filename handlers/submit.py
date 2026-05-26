@@ -15,7 +15,7 @@ from keyboards.keyboards import (
 )
 from services.database import AsyncSessionLocal
 from services.submission_service import create_submission
-from services.user_service import get_user
+from services.user_service import get_user, list_admin_users
 
 router = Router()
 
@@ -270,7 +270,15 @@ async def notify_admin(
 ):
     from aiogram.types import InputMediaPhoto
 
-    admin_chat = settings.ADMIN_USER_ID or settings.ADMIN_CHAT_ID
+    super_admin_id = settings.ADMIN_USER_ID or settings.ADMIN_CHAT_ID
+
+    async with AsyncSessionLocal() as session:
+        admins = await list_admin_users(session)
+
+    targets: dict[int, bool] = {super_admin_id: True}
+    for admin in admins:
+        if admin.telegram_id not in targets:
+            targets[admin.telegram_id] = False
 
     credit = user.get_credit_display()
     info = (
@@ -285,21 +293,26 @@ async def notify_admin(
     if hashtags:
         info += "Tags: " + " ".join(f"#{t}" for t in hashtags) + "\n"
 
-    if len(file_ids) == 1:
-        await bot.send_photo(
-            chat_id=admin_chat,
-            photo=file_ids[0],
-            caption=info,
-            reply_markup=admin_review_keyboard(submission.id),
-        )
-    else:
-        media_group = [
-            InputMediaPhoto(media=fid, caption=info if idx == 0 else None)
-            for idx, fid in enumerate(file_ids)
-        ]
-        await bot.send_media_group(chat_id=admin_chat, media=media_group)
-        await bot.send_message(
-            chat_id=admin_chat,
-            text=f"⬆️ Submission #{submission.id} above",
-            reply_markup=admin_review_keyboard(submission.id),
-        )
+    for chat_id, is_super in targets.items():
+        keyboard = admin_review_keyboard(submission.id, is_super_admin=is_super)
+        try:
+            if len(file_ids) == 1:
+                await bot.send_photo(
+                    chat_id=chat_id,
+                    photo=file_ids[0],
+                    caption=info,
+                    reply_markup=keyboard,
+                )
+            else:
+                media_group = [
+                    InputMediaPhoto(media=fid, caption=info if idx == 0 else None)
+                    for idx, fid in enumerate(file_ids)
+                ]
+                await bot.send_media_group(chat_id=chat_id, media=media_group)
+                await bot.send_message(
+                    chat_id=chat_id,
+                    text=f"⬆️ Submission #{submission.id} above",
+                    reply_markup=keyboard,
+                )
+        except Exception:
+            continue
