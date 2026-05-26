@@ -13,11 +13,13 @@ async def create_submission(
     caption: str | None,
     location: str | None,
     file_ids: list[str],
+    hashtags: list[str] | None = None,
 ) -> Submission:
     submission = Submission(
         user_id=user_id,
         caption=caption,
         location=location,
+        hashtags=",".join(hashtags) if hashtags else None,
         status=SubmissionStatus.pending,
     )
     session.add(submission)

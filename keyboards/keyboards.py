@@ -1,6 +1,8 @@
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
+from models.models import AVAILABLE_HASHTAGS
+
 
 def start_keyboard(has_profile: bool = False) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
@@ -75,6 +77,29 @@ def submission_add_more_keyboard() -> InlineKeyboardMarkup:
     )
     builder.row(
         InlineKeyboardButton(text="Submit as is", callback_data="submit_confirm"),
+        InlineKeyboardButton(text="Cancel", callback_data="submit_cancel"),
+    )
+    return builder.as_markup()
+
+
+def submission_skip_keyboard(skip_callback: str) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="Skip ⏭", callback_data=skip_callback),
+        InlineKeyboardButton(text="Cancel", callback_data="submit_cancel"),
+    )
+    return builder.as_markup()
+
+
+def submission_hashtag_keyboard(selected: set[str]) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    for tag in AVAILABLE_HASHTAGS:
+        label = f"✓ #{tag}" if tag in selected else f"#{tag}"
+        builder.button(text=label, callback_data=f"tag_{tag}")
+    builder.adjust(3)
+    builder.row(
+        InlineKeyboardButton(text="✅ Done", callback_data="tags_done"),
+        InlineKeyboardButton(text="Skip ⏭", callback_data="tags_skip"),
         InlineKeyboardButton(text="Cancel", callback_data="submit_cancel"),
     )
     return builder.as_markup()

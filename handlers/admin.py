@@ -1,5 +1,5 @@
 from aiogram import Bot, F, Router
-from aiogram.filters import Filter
+from aiogram.filters import Command, Filter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
@@ -15,18 +15,37 @@ from services.submission_service import (
     update_submission_caption,
     update_submission_status,
 )
-from services.user_service import add_reputation, ban_user
+from services.user_service import (
+    add_reputation,
+    ban_user,
+    get_user,
+    list_admin_users,
+    list_banned_users,
+    set_user_admin,
+    unban_user,
+)
 
 router = Router()
 
 
-def _admin_user_id() -> int:
+def _super_admin_id() -> int:
     return settings.ADMIN_USER_ID or settings.ADMIN_CHAT_ID
 
 
 class IsAdmin(Filter):
     async def __call__(self, event: CallbackQuery | Message) -> bool:
-        return bool(event.from_user and event.from_user.id == _admin_user_id())
+        if not event.from_user:
+            return False
+        if event.from_user.id == _super_admin_id():
+            return True
+        async with AsyncSessionLocal() as session:
+            user = await get_user(session, event.from_user.id)
+        return bool(user and user.is_admin)
+
+
+class IsSuperAdmin(Filter):
+    async def __call__(self, event: CallbackQuery | Message) -> bool:
+        return bool(event.from_user and event.from_user.id == _super_admin_id())
 
 
 class AdminEditForm(StatesGroup):
@@ -212,3 +231,148 @@ async def admin_ban_user(callback: CallbackQuery, bot: Bot):
 
     await _safe_append_review_note(callback.message, f"🚫 User {user.display_name} banned.")
     await callback.answer("User banned")
+
+
+def _parse_telegram_id(text: str) -> int | None:
+    parts = (text or "").split(maxsplit=1)
+    if len(parts) < 2:
+        return None
+    try:
+        return int(parts[1].strip().lstrip("@"))
+    except ValueError:
+        return None
+
+
+@router.message(IsSuperAdmin(), Command("addadmin"))
+async def cmd_add_admin(message: Message, bot: Bot):
+    target_id = _parse_telegram_id(message.text or "")
+    if target_id is None:
+        await message.answer("Usage: /addadmin <telegram_id>")
+        return
+
+    async with AsyncSessionLocal() as session:
+        user = await get_user(session, target_id)
+        if not user:
+            await message.answer(
+                f"No user with telegram id {target_id} found. "
+                "They need to /start the bot and create a profile first."
+            )
+            return
+        await set_user_admin(session, user, True)
+
+    await message.answer(f"Promoted {user.display_name} (id {target_id}) to admin. ✓")
+    try:
+        await bot.send_message(
+            chat_id=target_id,
+            text="You've been promoted to admin. You can now approve, reject, and review submissions.",
+        )
+    except Exception:
+        pass
+
+
+@router.message(IsSuperAdmin(), Command("removeadmin"))
+async def cmd_remove_admin(message: Message, bot: Bot):
+    target_id = _parse_telegram_id(message.text or "")
+    if target_id is None:
+        await message.answer("Usage: /removeadmin <telegram_id>")
+        return
+
+    if target_id == _super_admin_id():
+        await message.answer("Cannot demote the super admin.")
+        return
+
+    async with AsyncSessionLocal() as session:
+        user = await get_user(session, target_id)
+        if not user:
+            await message.answer(f"No user with telegram id {target_id} found.")
+            return
+        if not user.is_admin:
+            await message.answer(f"{user.display_name} is not an admin.")
+            return
+        await set_user_admin(session, user, False)
+
+    await message.answer(f"Removed admin from {user.display_name} (id {target_id}). ✓")
+    try:
+        await bot.send_message(
+            chat_id=target_id,
+            text="Your admin access has been removed.",
+        )
+    except Exception:
+        pass
+
+
+@router.message(IsAdmin(), Command("admins"))
+async def cmd_list_admins(message: Message):
+    async with AsyncSessionLocal() as session:
+        admins = await list_admin_users(session)
+
+    lines = [f"Super admin: id {_super_admin_id()}"]
+    if admins:
+        lines.append("\nAdmins:")
+        for u in admins:
+            lines.append(f"• {u.display_name} (id {u.telegram_id})")
+    else:
+        lines.append("\nNo additional admins.")
+    await message.answer("\n".join(lines))
+
+
+@router.message(IsAdmin(), Command("unban"))
+async def cmd_unban(message: Message, bot: Bot):
+    target_id = _parse_telegram_id(message.text or "")
+    if target_id is None:
+        await message.answer("Usage: /unban <telegram_id>")
+        return
+
+    async with AsyncSessionLocal() as session:
+        user = await get_user(session, target_id)
+        if not user:
+            await message.answer(f"No user with telegram id {target_id} found.")
+            return
+        if not user.is_banned:
+            await message.answer(f"{user.display_name} is not banned.")
+            return
+        await unban_user(session, user)
+
+    await message.answer(f"Unbanned {user.display_name} (id {target_id}). ✓")
+    try:
+        await bot.send_message(
+            chat_id=target_id,
+            text="Your account has been reinstated. You can submit moments again. ✦",
+        )
+    except Exception:
+        pass
+
+
+@router.message(IsAdmin(), Command("ban"))
+async def cmd_ban(message: Message, bot: Bot):
+    target_id = _parse_telegram_id(message.text or "")
+    if target_id is None:
+        await message.answer("Usage: /ban <telegram_id>")
+        return
+
+    async with AsyncSessionLocal() as session:
+        user = await get_user(session, target_id)
+        if not user:
+            await message.answer(f"No user with telegram id {target_id} found.")
+            return
+        if user.is_banned:
+            await message.answer(f"{user.display_name} is already banned.")
+            return
+        await ban_user(session, user)
+
+    await message.answer(f"Banned {user.display_name} (id {target_id}).")
+
+
+@router.message(IsAdmin(), Command("banned"))
+async def cmd_list_banned(message: Message):
+    async with AsyncSessionLocal() as session:
+        banned = await list_banned_users(session)
+
+    if not banned:
+        await message.answer("No banned users.")
+        return
+
+    lines = ["Banned users:"]
+    for u in banned:
+        lines.append(f"• {u.display_name} (id {u.telegram_id})")
+    await message.answer("\n".join(lines))

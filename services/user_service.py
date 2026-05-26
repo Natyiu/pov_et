@@ -71,3 +71,23 @@ async def add_reputation(
 async def ban_user(session: AsyncSession, user: User):
     user.is_banned = True
     await session.commit()
+
+
+async def unban_user(session: AsyncSession, user: User):
+    user.is_banned = False
+    await session.commit()
+
+
+async def list_banned_users(session: AsyncSession) -> list[User]:
+    result = await session.execute(select(User).where(User.is_banned == True))
+    return result.scalars().all()
+
+
+async def set_user_admin(session: AsyncSession, user: User, is_admin: bool):
+    user.is_admin = is_admin
+    await session.commit()
+
+
+async def list_admin_users(session: AsyncSession) -> list[User]:
+    result = await session.execute(select(User).where(User.is_admin == True))
+    return result.scalars().all()

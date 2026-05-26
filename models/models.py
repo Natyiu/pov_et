@@ -76,6 +76,34 @@ BADGES = {
     "travel_seeker": ("🧭", "Travel Frame Seeker", "submitted from multiple regions"),
 }
 
+AVAILABLE_HASHTAGS = [
+    "sunset",
+    "flowers",
+    "citylights",
+    "countryside",
+    "streetvibes",
+    "rainyday",
+    "nightwalk",
+    "mountains",
+    "clouds",
+    "cafevibes",
+    "nature",
+    "roads",
+    "sky",
+    "urbanvibes",
+    "goldenhour",
+    "dailylife",
+    "vintagevibes",
+    "windowview",
+    "moodygrams",
+    "architecture",
+    "morningvibes",
+    "streetshots",
+    "landscape",
+    "villagevibes",
+    "travelgram",
+]
+
 
 class User(Base):
     __tablename__ = "users"
@@ -90,6 +118,7 @@ class User(Base):
     level = Column(Enum(ReputationLevel), default=ReputationLevel.observer)
     badges = Column(Text, default="")
     is_banned = Column(Boolean, default=False)
+    is_admin = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     submissions = relationship("Submission", back_populates="user")
@@ -126,6 +155,7 @@ class Submission(Base):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     caption = Column(Text, nullable=True)
     location = Column(String(128), nullable=True)
+    hashtags = Column(Text, nullable=True)
     status = Column(Enum(SubmissionStatus), default=SubmissionStatus.pending)
     admin_note = Column(Text, nullable=True)
     channel_message_id = Column(Integer, nullable=True)

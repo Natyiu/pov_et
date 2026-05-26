@@ -5,6 +5,25 @@ from config import settings
 from models.models import Submission, User
 
 
+def _channel_link() -> str:
+    title = settings.CHANNEL_TITLE
+    url = settings.CHANNEL_URL
+    if not url and settings.CHANNEL_ID.startswith("@"):
+        url = f"https://t.me/{settings.CHANNEL_ID.lstrip('@')}"
+    if url:
+        return f'<a href="{url}">{title}</a>'
+    return title
+
+
+def _format_hashtags(raw: str | None) -> str | None:
+    if not raw:
+        return None
+    tags = [t.strip() for t in raw.split(",") if t.strip()]
+    if not tags:
+        return None
+    return " ".join(f"#{t}" for t in tags)
+
+
 def build_post_caption(submission: Submission, user: User) -> str:
     lines = []
 
@@ -19,6 +38,12 @@ def build_post_caption(submission: Submission, user: User) -> str:
 
     if submission.status.value in ("featured_weekly", "featured_monthly"):
         lines.append("\n✨ Featured")
+
+    hashtag_line = _format_hashtags(submission.hashtags)
+    if hashtag_line:
+        lines.append(f"\n{hashtag_line}")
+
+    lines.append(f"\n📡 {_channel_link()}")
 
     return "\n".join(lines)
 
@@ -41,6 +66,7 @@ async def publish_submission(
             chat_id=channel,
             photo=media_list[0].telegram_file_id,
             caption=caption,
+            parse_mode="HTML",
         )
         return msg.message_id
 
@@ -50,6 +76,7 @@ async def publish_submission(
             InputMediaPhoto(
                 media=m.telegram_file_id,
                 caption=caption if idx == 0 else None,
+                parse_mode="HTML" if idx == 0 else None,
             )
         )
     messages = await bot.send_media_group(chat_id=channel, media=media_group)

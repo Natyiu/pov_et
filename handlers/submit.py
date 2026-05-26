@@ -9,8 +9,9 @@ from config import settings
 from keyboards.keyboards import (
     admin_review_keyboard,
     start_keyboard,
-    submission_add_more_keyboard,
     submission_confirm_keyboard,
+    submission_hashtag_keyboard,
+    submission_skip_keyboard,
 )
 from services.database import AsyncSessionLocal
 from services.submission_service import create_submission
@@ -24,8 +25,9 @@ _media_timers: dict[int, asyncio.Task] = {}
 
 class SubmitForm(StatesGroup):
     waiting_photos = State()
-    adding_caption = State()
-    adding_location = State()
+    waiting_location = State()
+    waiting_caption = State()
+    waiting_hashtags = State()
     confirming = State()
 
 
@@ -33,6 +35,55 @@ def _cancel_media_timer(user_id: int):
     task = _media_timers.pop(user_id, None)
     if task:
         task.cancel()
+
+
+async def _prompt_location(message: Message, state: FSMContext):
+    await message.answer(
+        "Where was this taken? (city, region, or landmark)\n\n"
+        "Example: Bahir Dar, Lalibela, Merkato Addis Ababa\n\n"
+        "Send the location as text, or tap Skip.",
+        reply_markup=submission_skip_keyboard("loc_skip"),
+    )
+    await state.set_state(SubmitForm.waiting_location)
+
+
+async def _prompt_caption(message: Message, state: FSMContext):
+    await message.answer(
+        "Write a caption for your photo.\n\n"
+        "A short sentence or two — what's the moment? What does it feel like?\n\n"
+        "Send the caption as text, or tap Skip.",
+        reply_markup=submission_skip_keyboard("cap_skip"),
+    )
+    await state.set_state(SubmitForm.waiting_caption)
+
+
+async def _prompt_hashtags(message: Message, state: FSMContext):
+    data = await state.get_data()
+    selected = set(data.get("hashtags") or [])
+    await message.answer(
+        "Pick any hashtags that fit your photo.\n"
+        "Tap to toggle. Tap Done when you're finished, or Skip to add none.",
+        reply_markup=submission_hashtag_keyboard(selected),
+    )
+    await state.set_state(SubmitForm.waiting_hashtags)
+
+
+async def _show_summary(message: Message, state: FSMContext):
+    data = await state.get_data()
+    count = len(data.get("file_ids", []))
+    lines = [f"Ready to submit {count} photo(s)."]
+    if data.get("location"):
+        lines.append(f"Location: {data['location']}")
+    if data.get("caption"):
+        lines.append(f"Caption: {data['caption']}")
+    tags = data.get("hashtags") or []
+    if tags:
+        lines.append("Tags: " + " ".join(f"#{t}" for t in tags))
+    await message.answer(
+        "\n".join(lines),
+        reply_markup=submission_confirm_keyboard(),
+    )
+    await state.set_state(SubmitForm.confirming)
 
 
 @router.callback_query(F.data == "submit_photo")
@@ -59,7 +110,7 @@ async def start_submission(callback: CallbackQuery, state: FSMContext):
         "You can send up to 10 images at once as a media group."
     )
     await state.set_state(SubmitForm.waiting_photos)
-    await state.update_data(file_ids=[], caption=None, location=None)
+    await state.update_data(file_ids=[], caption=None, location=None, hashtags=[])
     await callback.answer()
 
 
@@ -84,67 +135,89 @@ async def receive_photo(message: Message, state: FSMContext, bot: Bot):
         current_data = await state.get_data()
         count = len(current_data.get("file_ids", []))
         suffix = "s" if count > 1 else ""
-        await message.answer(
-            f"{count} photo{suffix} received.\n\n"
-            "Would you like to add a caption or location before submitting?",
-            reply_markup=submission_add_more_keyboard(),
-        )
+        await message.answer(f"{count} photo{suffix} received.")
+        await _prompt_location(message, state)
 
     _media_timers[user_id] = asyncio.create_task(finalize())
 
 
-@router.callback_query(SubmitForm.waiting_photos, F.data == "add_caption")
-async def prompt_caption(callback: CallbackQuery, state: FSMContext):
-    await callback.message.edit_text(
-        "Write a caption for your photo.\n\n"
-        "A short sentence or two. What's the moment? What does it feel like?"
-    )
-    await state.set_state(SubmitForm.adding_caption)
-    await callback.answer()
-
-
-@router.message(SubmitForm.adding_caption)
-async def receive_caption(message: Message, state: FSMContext):
-    caption = message.text.strip()[:500]
-    await state.update_data(caption=caption)
-    await message.answer(
-        "Caption noted.\n\nAdd a location? - or tap Submit.",
-        reply_markup=submission_add_more_keyboard(),
-    )
-    await state.set_state(SubmitForm.waiting_photos)
-
-
-@router.callback_query(SubmitForm.waiting_photos, F.data == "add_location")
-async def prompt_location(callback: CallbackQuery, state: FSMContext):
-    await callback.message.edit_text(
-        "Where was this taken? (city, region, or landmark)\n\n"
-        "Example: Bahir Dar, Lalibela, Merkato Addis Ababa"
-    )
-    await state.set_state(SubmitForm.adding_location)
-    await callback.answer()
-
-
-@router.message(SubmitForm.adding_location)
+@router.message(SubmitForm.waiting_location)
 async def receive_location(message: Message, state: FSMContext):
-    location = message.text.strip()[:128]
+    location = (message.text or "").strip()[:128]
+    if not location:
+        await message.answer(
+            "Send the location as text, or tap Skip.",
+            reply_markup=submission_skip_keyboard("loc_skip"),
+        )
+        return
     await state.update_data(location=location)
+    await _prompt_caption(message, state)
+
+
+@router.callback_query(SubmitForm.waiting_location, F.data == "loc_skip")
+async def skip_location(callback: CallbackQuery, state: FSMContext):
+    await state.update_data(location=None)
+    await callback.message.edit_reply_markup(reply_markup=None)
+    await _prompt_caption(callback.message, state)
+    await callback.answer()
+
+
+@router.message(SubmitForm.waiting_caption)
+async def receive_caption(message: Message, state: FSMContext):
+    caption = (message.text or "").strip()[:500]
+    if not caption:
+        await message.answer(
+            "Send the caption as text, or tap Skip.",
+            reply_markup=submission_skip_keyboard("cap_skip"),
+        )
+        return
+    await state.update_data(caption=caption)
+    await _prompt_hashtags(message, state)
+
+
+@router.callback_query(SubmitForm.waiting_caption, F.data == "cap_skip")
+async def skip_caption(callback: CallbackQuery, state: FSMContext):
+    await state.update_data(caption=None)
+    await callback.message.edit_reply_markup(reply_markup=None)
+    await _prompt_hashtags(callback.message, state)
+    await callback.answer()
+
+
+@router.callback_query(SubmitForm.waiting_hashtags, F.data.startswith("tag_"))
+async def toggle_hashtag(callback: CallbackQuery, state: FSMContext):
+    tag = callback.data[len("tag_"):]
     data = await state.get_data()
-    count = len(data.get("file_ids", []))
+    selected = set(data.get("hashtags") or [])
+    if tag in selected:
+        selected.discard(tag)
+    else:
+        selected.add(tag)
+    await state.update_data(hashtags=list(selected))
+    try:
+        await callback.message.edit_reply_markup(
+            reply_markup=submission_hashtag_keyboard(selected),
+        )
+    except Exception:
+        pass
+    await callback.answer()
 
-    summary_lines = [f"Ready to submit {count} photo(s)."]
-    if data.get("caption"):
-        summary_lines.append("Caption saved.")
-    if data.get("location"):
-        summary_lines.append(f"Location: {data['location']}")
 
-    await message.answer(
-        "\n".join(summary_lines),
-        reply_markup=submission_confirm_keyboard(),
-    )
-    await state.set_state(SubmitForm.waiting_photos)
+@router.callback_query(SubmitForm.waiting_hashtags, F.data == "tags_done")
+async def finish_hashtags(callback: CallbackQuery, state: FSMContext):
+    await callback.message.edit_reply_markup(reply_markup=None)
+    await _show_summary(callback.message, state)
+    await callback.answer()
 
 
-@router.callback_query(SubmitForm.waiting_photos, F.data == "submit_confirm")
+@router.callback_query(SubmitForm.waiting_hashtags, F.data == "tags_skip")
+async def skip_hashtags(callback: CallbackQuery, state: FSMContext):
+    await state.update_data(hashtags=[])
+    await callback.message.edit_reply_markup(reply_markup=None)
+    await _show_summary(callback.message, state)
+    await callback.answer()
+
+
+@router.callback_query(SubmitForm.confirming, F.data == "submit_confirm")
 async def confirm_submission(callback: CallbackQuery, state: FSMContext, bot: Bot):
     data = await state.get_data()
     file_ids = data.get("file_ids", [])
@@ -163,6 +236,7 @@ async def confirm_submission(callback: CallbackQuery, state: FSMContext, bot: Bo
             caption=data.get("caption"),
             location=data.get("location"),
             file_ids=file_ids,
+            hashtags=data.get("hashtags") or None,
         )
 
     await state.clear()
@@ -172,7 +246,7 @@ async def confirm_submission(callback: CallbackQuery, state: FSMContext, bot: Bo
         reply_markup=start_keyboard(has_profile=True),
     )
 
-    await notify_admin(bot, submission, user, file_ids)
+    await notify_admin(bot, submission, user, file_ids, data.get("hashtags") or [])
     await callback.answer()
 
 
@@ -187,7 +261,13 @@ async def cancel_submission(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
-async def notify_admin(bot: Bot, submission, user, file_ids: list[str]):
+async def notify_admin(
+    bot: Bot,
+    submission,
+    user,
+    file_ids: list[str],
+    hashtags: list[str],
+):
     from aiogram.types import InputMediaPhoto
 
     admin_chat = settings.ADMIN_USER_ID or settings.ADMIN_CHAT_ID
@@ -202,6 +282,8 @@ async def notify_admin(bot: Bot, submission, user, file_ids: list[str]):
         info += f"Location: {submission.location}\n"
     if submission.caption:
         info += f"Caption: {submission.caption}\n"
+    if hashtags:
+        info += "Tags: " + " ".join(f"#{t}" for t in hashtags) + "\n"
 
     if len(file_ids) == 1:
         await bot.send_photo(
